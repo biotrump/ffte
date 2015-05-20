@@ -1,4 +1,4 @@
-FC = f90
+FC = f95
 FCFLAGS = -O3 -I..
 #FC = ifort
 #FCFLAGS = -O3 -xAVX -I..
