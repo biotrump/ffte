@@ -22,35 +22,82 @@ CYGWIN*)
   *) echo $0: Unknown platform; exit
 esac
 
-if [ -z "${LAPACK_SRC}" ];then
-export LAPACK_SRC=`pwd`
+if [ -z "${FFTE_SRC}" ];then
+export FFTE_SRC=`pwd`
 fi
 
-# Modify INSTALL_DIR to suit your situation
-#Lollipop	5.0 - 5.1	API level 21, 22
-#KitKat	4.4 - 4.4.4	API level 19
-#Jelly Bean	4.3.x	API level 18
-#Jelly Bean	4.2.x	API level 17
-#Jelly Bean	4.1.x	API level 16
-#Ice Cream Sandwich	4.0.3 - 4.0.4	API level 15, NDK 8
-#Ice Cream Sandwich	4.0.1 - 4.0.2	API level 14, NDK 7
-#Honeycomb	3.2.x	API level 13
-#Honeycomb	3.1	API level 12, NDK 6
-#Honeycomb	3.0	API level 11
-#Gingerbread	2.3.3 - 2.3.7	API level 10
-#Gingerbread	2.3 - 2.3.2	API level 9, NDK 5
-#Froyo	2.2.x	API level 8, NDK 4
-
-#NDK_ROOT=${NDK_ROOT:-/home/thomas/aosp/NDK/android-ndk-r10d}
-#export NDK_ROOT
-#gofortran is supported in r9
 if [ -z "${NDK_ROOT_FORTRAN}"  ]; then
 	export NDK_ROOT=${HOME}/NDK/android-ndk-r9
+	#export NDK_ROOT=${HOME}/NDK/android-ndk-r9
 else
 	export NDK_ROOT=${NDK_ROOT_FORTRAN}
 fi
 export ANDROID_NDK=${NDK_ROOT}
-	
+
+BUILD_FFTE_GENERIC=1
+BUILD_FFTE_VEC=0
+BUILD_FFTE_NEON=0
+BUILD_FFTE_CUDA=0
+
+while [ $# -ge 1 ]; do
+	case $1 in
+	-ABI|-abi)
+		#echo "\$1=-abi"
+		shift
+		APP_ABI=$1
+		shift
+		;;
+	-acc|-ACC)
+		shift
+		case $1 in
+		GENERIC|generic)
+			BUILD_FFTE_GENERIC=1
+			;;
+		VEC|vec)
+			BUILD_FFTE_VEC=1
+			;;
+
+		NEON|neon)
+			BUILD_FFTE_NEON=1
+			;;
+
+		CUDA|cuda)
+			BUILD_FFTE_CUDA=1
+			;;
+
+		*)
+			BUILD_FFTE_GENERIC=1
+			;;
+		esac
+		shift
+		;;
+	-clean|-c|-C) #
+		echo "\$1=-c,-C,-clean"
+		clean_build=1
+		shift
+		;;
+	-l|-L)
+		echo "\$1=-l,-L"
+		local_build=1
+		;;
+	--help|-h|-H)
+		# The main case statement will give a usage message.
+		echo "$0 -c|-clean -abi=[armeabi, armeabi-v7a, armv8-64,mips,mips64el, x86,x86_64]"
+		exit 1
+		break
+		;;
+	-*)
+		echo "$0: unrecognized option $1" >&2
+		exit 1
+		;;
+	*)
+		break
+		;;
+	esac
+done
+echo APP_ABI=$APP_ABI
+export APP_ABI
+
 if [[ ${NDK_ROOT} =~ .*"-r9".* ]]
 then
 #ANDROID_APIVER=android-8
@@ -61,111 +108,222 @@ ANDROID_APIVER=android-14
 #gfortran is in r9d V4.8.0
 TOOL_VER="4.8.0"
 else
-#android 4.0.1 ICS and above
-ANDROID_APIVER=android-14
+#r10d : android 4.0.1 ICS and above
+if [ "$APP_ABI" = "arm64-v8a" -o \
+	"$APP_ABI" = "x86_64" -o \
+	"$APP_ABI" = "mips64" ]; then
+	ANDROID_APIVER=android-21
+else
+	ANDROID_APIVER=android-14
+fi
 TOOL_VER="4.9"
 fi
-
-if [ "$#" -eq 0 ]; then
-	if [ "${TARGET_ARCH}" == "arm" ]; then
-		export ARCHI=${TARGET_ARCH}
-	elif [ "${TARGET_ARCH}" == "x86_32" ]; then
-		export ARCHI=${TARGET_ARCH}
-	else
-		export ARCHI=arm
-	fi	
-elif [ $# -ge 1 ]; then
-	export ARCHI=$1
-fi
-
-echo ARCHI=$ARCHI
-
+#echo ANDROID_APIVER=$ANDROID_APIVER
+#read
 #default is arm
-case $ARCHI in
-  arm)
+#export PATH="$NDK_ROOT/toolchains/${TARGPLAT}-${TOOL_VER}/prebuilt/${HOSTPLAT}/bin/:\
+#$NDK_ROOT/toolchains/${TARGPLAT}-${TOOL_VER}/prebuilt/${HOSTPLAT}/${TARGPLAT}/bin/:$PATH"
+case $APP_ABI in
+  armeabi)
     TARGPLAT=arm-linux-androideabi
-    CONFTARG=arm-eabi
-	echo "Using: $NDK_ROOT/toolchains/${TARGPLAT}-${TOOL_VER}/prebuilt/${HOSTPLAT}/bin"
-	#export PATH="$NDK_ROOT/toolchains/${TARGPLAT}-${TOOL_VER}/prebuilt/${HOSTPLAT}/bin/:\
-	#$NDK_ROOT/toolchains/${TARGPLAT}-${TOOL_VER}/prebuilt/${HOSTPLAT}/${TARGPLAT}/bin/:$PATH"
-	export PATH="${NDK_ROOT}/toolchains/${TARGPLAT}-${TOOL_VER}/prebuilt/${HOSTPLAT}/bin/:$PATH"
+    TOOLCHAINS=arm-linux-androideabi
+    ARCH=arm
+
+	FFTE_LIB_NAME=ffte
+	#enable VFP only
   ;;
-  x86)
+  armeabi-v7a)
+    TARGPLAT=arm-linux-androideabi
+    TOOLCHAINS=arm-linux-androideabi
+    ARCH=arm
+	#enable NEON
+	FFTE_LIB_NAME=ffte
+  ;;
+  arm64-v8a)
+    TARGPLAT=aarch64-linux-android
+    TOOLCHAINS=aarch64-linux-android
+    ARCH=arm64
+
+	FFTE_LIB_NAME=ffte
+  ;;
+  x86)#atom-32
     TARGPLAT=i686-linux-android
-    CONFTARG=x86
-	echo "Using: $NDK_ROOT/toolchains/x86-${TOOL_VER}/prebuilt/${HOSTPLAT}/bin"
-	export PATH="${NDK_ROOT}/toolchains/x86-${TOOL_VER}/prebuilt/${HOSTPLAT}/bin/:$PATH"
-#specify assembler for x86 SSE3, but ffts's sse.s needs 64bit x86.
-#intel atom z2xxx and the old atoms are 32bit, so 64bit x86 in android can't work in
-#most atom devices.
-#http://forum.cvapp.org/viewtopic.php?f=13&t=423&sid=4c47343b1de899f9e1b0d157d04d0af1
-#	export  CCAS="${TARGPLAT}-as"
+    TOOLCHAINS=x86
+    ARCH=x86
+	#specify assembler for x86 SSE3, but ffte's sse.s needs 64bit x86.
+	#intel atom z2xxx and the old atoms are 32bit
+	#http://forum.cvapp.org/viewtopic.php?f=13&t=423&sid=4c47343b1de899f9e1b0d157d04d0af1
+	export  CCAS="${TARGPLAT}-as"
+	export  CCASFLAGS="--32 -march=i686+sse3"
+
+	echo "$APP_ABI is not supported in dsplib yet!!!"
+  ;;
+  x86_64)
+    TARGPLAT=x86_64-linux-android
+    TOOLCHAINS=x86_64
+    ARCH=x86_64
+    #specify assembler for x86 SSE3, but ffte's sse.s needs 64bit x86.
+	#atom-64 or x86-64 devices only.
+	#http://forum.cvapp.org/viewtopic.php?f=13&t=423&sid=4c47343b1de899f9e1b0d157d04d0af1
+	export  CCAS="${TARGPLAT}-as"
 #	export  CCASFLAGS="--64 -march=i686+sse3"
-#	export  CCASFLAGS="--64"
+	export  CCASFLAGS="--64"
 
   ;;
   mips)
-  ## probably wrong
-    TARGPLAT=mipsel-linux-android
-    CONFTARG=mips
+	## probably wrong
+	TARGPLAT=mipsel-linux-android
+	TOOLCHAINS=mipsel-linux-android
+	ARCH=mips
+	echo "$APP_ABI is not supported in dsplib yet!!!"
+  ;;
+  mips64)
+	## probably wrong
+	TARGPLAT=mips64el-linux-android
+	TOOLCHAINS=mips64el-linux-android
+	ARCH=mips64
+	echo "$APP_ABI is not supported in FFTE yet!!!"
   ;;
   *) echo $0: Unknown target; exit
 esac
-#: ${NDK_ROOT:?}
-echo $PATH
 
-export SYS_ROOT="${NDK_ROOT}/platforms/${ANDROID_APIVER}/arch-${ARCHI}/"
+echo "Using: $NDK_ROOT/toolchains/${TOOLCHAINS}-${TOOL_VER}/prebuilt/${HOSTPLAT}/bin"
+export PATH="${NDK_ROOT}/toolchains/${TOOLCHAINS}-${TOOL_VER}/prebuilt/${HOSTPLAT}/bin/:$PATH"
+
+export SYS_ROOT="${NDK_ROOT}/platforms/${ANDROID_APIVER}/arch-${ARCH}/"
 export CC="${TARGPLAT}-gcc --sysroot=$SYS_ROOT"
 export LD="${TARGPLAT}-ld"
 export AR="${TARGPLAT}-ar"
-export ARCH=${AR}
 export RANLIB="${TARGPLAT}-ranlib"
 export STRIP="${TARGPLAT}-strip"
 #export CFLAGS="-Os -fPIE"
-export CFLAGS="-Os -fPIE -fPIC --sysroot=$SYS_ROOT"
-export CXXFLAGS="-fPIE -fPIC --sysroot=$SYS_ROOT"
+export CFLAGS="-Os -fPIE --sysroot=$SYS_ROOT"
+export CXXFLAGS="-fPIE --sysroot=$SYS_ROOT"
 export FORTRAN="${TARGPLAT}-gfortran --sysroot=$SYS_ROOT"
 
 #!!! quite importnat for cmake to define the NDK's fortran compiler.!!!
 #Don't let cmake decide it.
 export FC=${FORTRAN}
+export AM_ANDROID_EXTRA="-llog -fPIE -pie"
 
-if [ -z "${LAPACK_OUT}" ];then
-export LAPACK_OUT=build_NDK_$ARCHI
+if [ -z "$FFTE_OUT" ]; then
+	export FFTE_DIR=`pwd`
+	export FFTE_OUT=${FFTE_OUT:-$FFTE_DIR/build}
+	export local_build=1
 fi
 
-if [ ! -d $LAPACK_OUT ]; then
-mkdir -p $LAPACK_OUT
+#check if it needs a clean build?
+if [ -d "$FFTE_OUT/$APP_ABI" ]; then
+	if [ -n "$clean_build" ]; then
+		rm -rf $FFTE_OUT/$APP_ABI/*
+	fi
 else
-rm -rf $LAPACK_OUT/*
+	mkdir -p $FFTE_OUT/$APP_ABI
 fi
-	
-case $ARCHI in
-  arm)
-	if [ -f make.inc.armv7-a ]; then
-		cp -f make.inc.armv7-a make.inc
-	fi
 
-	pushd $LAPACK_OUT
+pushd ${FFTE_OUT}/$APP_ABI
 
-	cmake -DCMAKE_TOOLCHAIN_FILE=${LAPACK_SRC}/android.toolchain.cmake -DANDROID_NATIVE_API_LEVEL=${ANDROID_APIVER} \
-	-DANDROID_NDK=${NDK_ROOT} -DANDROID_TOOLCHAIN_NAME=${TARGPLAT}-${TOOL_VER} \
-	-DCMAKE_BUILD_TYPE=Release -DANDROID_ABI="armeabi-v7a with VFPV3" ${LAPACK_SRC}
-  ;;
+case $APP_ABI in
+	armeabi)
+	cmake -DCMAKE_TOOLCHAIN_FILE=${FFTE_DIR}/android.toolchain.cmake \
+	-DANDROID_NATIVE_API_LEVEL=${ANDROID_APIVER} -DAPP_ABI=${APP_ABI} \
+	-DANDROID_NDK=${ANDROID_NDK} -DANDROID_TOOLCHAIN_NAME=${TOOLCHAINS}-${TOOL_VER} \
+	-DCMAKE_BUILD_TYPE=Release -DANDROID_ABI=$APP_ABI \
+	-DFFTE_DIR:FILEPATH=${FFTE_DIR} -DFFTE_LIB_NAME=${FFTE_LIB_NAME} \
+	-DFFTE_OUT:FILEPATH=${FFTE_OUT} \
+	-DBUILD_FFTE_GENERIC:BOOL=${BUILD_FFTE_GENERIC} -DBUILD_FFTE_VEC:BOOL=${BUILD_FFTE_VEC} \
+	-DBUILD_FFTE_NEON:BOOL=${BUILD_FFTE_NEON} -DBUILD_FFTE_CUDA:BOOL=${BUILD_FFTE_CUDA} \
+	${FFTE_DIR}
+	;;
+	armeabi-v7a)
+	cmake -DCMAKE_TOOLCHAIN_FILE=${FFTE_DIR}/android.toolchain.cmake \
+	-DANDROID_NATIVE_API_LEVEL=${ANDROID_APIVER} -DAPP_ABI=${APP_ABI} \
+	-DANDROID_NDK=${ANDROID_NDK} -DANDROID_TOOLCHAIN_NAME=${TOOLCHAINS}-${TOOL_VER} \
+	-DCMAKE_BUILD_TYPE=Release -DANDROID_ABI="armeabi-v7a with NEON" \
+	-DFFTE_DIR:FILEPATH=${FFTE_DIR} -DFFTE_LIB_NAME=${FFTE_LIB_NAME} \
+	-DFFTE_OUT:FILEPATH=${FFTE_OUT} \
+	-DBUILD_FFTE_GENERIC:BOOL=${BUILD_FFTE_GENERIC} -DBUILD_FFTE_VEC:BOOL=${BUILD_FFTE_VEC} \
+	-DBUILD_FFTE_NEON:BOOL=${BUILD_FFTE_NEON} -DBUILD_FFTE_CUDA:BOOL=${BUILD_FFTE_CUDA} \
+	${FFTE_DIR}
+	;;
+	arm64-v8a)
+	cmake -DCMAKE_TOOLCHAIN_FILE=${FFTE_DIR}/android.toolchain.cmake \
+	-DANDROID_NATIVE_API_LEVEL=${ANDROID_APIVER} \
+	-DANDROID_NDK=${ANDROID_NDK} -DANDROID_TOOLCHAIN_NAME=${TOOLCHAINS}-${TOOL_VER} \
+	-DCMAKE_BUILD_TYPE=Release -DANDROID_ABI=$APP_ABI \
+	-DFFTE_DIR:FILEPATH=${FFTE_DIR} -DFFTE_LIB_NAME=${FFTE_LIB_NAME} \
+	-DFFTE_OUT:FILEPATH=${FFTE_OUT} \
+	-DBUILD_FFTE_GENERIC:BOOL=${BUILD_FFTE_GENERIC} -DBUILD_FFTE_VEC:BOOL=${BUILD_FFTE_VEC} \
+	-DBUILD_FFTE_NEON:BOOL=${BUILD_FFTE_NEON} -DBUILD_FFTE_CUDA:BOOL=${BUILD_FFTE_CUDA} \
+	${FFTE_DIR}
+	;;
   x86)
-	if [ -f make.inc.NDK-x86 ]; then
-	cp -f make.inc.NDK-x86 make.inc
-	fi
-	pushd $LAPACK_OUT
-	
-	cmake -DCMAKE_TOOLCHAIN_FILE=${LAPACK_SRC}/android.toolchain.cmake -DANDROID_NATIVE_API_LEVEL=${ANDROID_APIVER} \
-	-DANDROID_NDK=${NDK_ROOT} -DANDROID_TOOLCHAIN_NAME=x86-${TOOL_VER} \
-	-DCMAKE_BUILD_TYPE=Release -DANDROID_ABI="x86" ${LAPACK_SRC}
+	cmake -DCMAKE_TOOLCHAIN_FILE=${FFTE_DIR}/android.toolchain.cmake \
+	-DANDROID_NATIVE_API_LEVEL=${ANDROID_APIVER} \
+	-DANDROID_NDK=${NDK_ROOT} -DANDROID_TOOLCHAIN_NAME=${TOOLCHAINS}-${TOOL_VER} \
+	-DCMAKE_BUILD_TYPE=Release -DANDROID_ABI=$APP_ABI \
+	-DFFTE_DIR:FILEPATH=${FFTE_DIR} -DFFTE_LIB_NAME=${FFTE_LIB_NAME} \
+	-DFFTE_OUT:FILEPATH=${FFTE_OUT} \
+	-DBUILD_FFTE_GENERIC=${BUILD_FFTE_GENERIC} -DBUILD_FFTE_VEC:BOOL=${BUILD_FFTE_VEC} \
+	-DBUILD_FFTE_NEON:BOOL=${BUILD_FFTE_NEON} -DBUILD_FFTE_CUDA:BOOL=${BUILD_FFTE_CUDA} \
+	${FFTE_DIR}
+  ;;
+  x86_64)
+	cmake -DCMAKE_TOOLCHAIN_FILE=${FFTE_DIR}/android.toolchain.cmake \
+	-DANDROID_NATIVE_API_LEVEL=${ANDROID_APIVER} \
+	-DANDROID_NDK=${NDK_ROOT} -DANDROID_TOOLCHAIN_NAME=${TOOLCHAINS}-${TOOL_VER} \
+	-DCMAKE_BUILD_TYPE=Release -DANDROID_ABI=$APP_ABI \
+	-DFFTE_DIR:FILEPATH=${FFTE_DIR} -DFFTE_LIB_NAME=${FFTE_LIB_NAME} \
+	-DFFTE_OUT:FILEPATH=${FFTE_OUT} \
+	-DBUILD_FFTE_GENERIC=${BUILD_FFTE_GENERIC} -DBUILD_FFTE_VEC=${BUILD_FFTE_VEC} \
+	-DBUILD_FFTE_NEON=${BUILD_FFTE_NEON} -DBUILD_FFTE_CUDA=${BUILD_FFTE_CUDA} \
+	${FFTE_DIR}
   ;;
   mips)
+	cmake -DCMAKE_TOOLCHAIN_FILE=${FFTE_DIR}/android.toolchain.cmake \
+	-DANDROID_NATIVE_API_LEVEL=${ANDROID_APIVER} \
+	-DANDROID_NDK=${NDK_ROOT} -DANDROID_TOOLCHAIN_NAME=${TOOLCHAINS}-${TOOL_VER} \
+	-DCMAKE_BUILD_TYPE=Release -DANDROID_ABI=$APP_ABI \
+	-DFFTE_DIR:FILEPATH=${FFTE_DIR} -DFFTE_LIB_NAME=${FFTE_LIB_NAME} \
+	-DFFTE_OUT:FILEPATH=${FFTE_OUT} \
+	-DBUILD_FFTE_GENERIC=${BUILD_FFTE_GENERIC} -DBUILD_FFTE_VEC=${BUILD_FFTE_VEC} \
+	-DBUILD_FFTE_NEON=${BUILD_FFTE_NEON} -DBUILD_FFTE_CUDA=${BUILD_FFTE_CUDA} \
+	${FFTE_DIR}
+  ;;
+  mips64)
+	cmake -DCMAKE_TOOLCHAIN_FILE=${FFTE_DIR}/android.toolchain.cmake \
+	-DANDROID_NATIVE_API_LEVEL=${ANDROID_APIVER} \
+	-DANDROID_NDK=${NDK_ROOT} -DANDROID_TOOLCHAIN_NAME=${TOOLCHAINS}-${TOOL_VER} \
+	-DCMAKE_BUILD_TYPE=Release -DANDROID_ABI=$APP_ABI \
+	-DFFTE_DIR:FILEPATH=${FFTE_DIR} -DFFTE_LIB_NAME=${FFTE_LIB_NAME} \
+	-DFFTE_OUT:FILEPATH=${FFTE_OUT} \
+	-DBUILD_FFTE_GENERIC=${BUILD_FFTE_GENERIC} -DBUILD_FFTE_VEC=${BUILD_FFTE_VEC} \
+	-DBUILD_FFTE_NEON=${BUILD_FFTE_NEON} -DBUILD_FFTE_CUDA=${BUILD_FFTE_CUDA} \
+	${FFTE_DIR}
   ;;
   *) echo $0: Unknown target; exit
 esac
 
 make -j${CORE_COUNT}
+
 popd
+pushd ${FFTE_OUT}
+
+mkdir -p libs/$APP_ABI
+rm -rf libs/$APP_ABI/*
+
+if [ $BUILD_FFTE_GENERIC == 1 ]; then
+ln -s ${FFTE_OUT}/$APP_ABI/lib/libffte.a libs/$APP_ABI/
+fi
+if [ $BUILD_FFTE_VEC == 1 ]; then
+ln -s ${FFTE_OUT}/$APP_ABI/lib/libffte_vec.a libs/$APP_ABI/
+fi
+if [ $BUILD_FFTE_NEON == 1 ]; then
+ln -s ${FFTE_OUT}/$APP_ABI/lib/libffte_neon.a libs/$APP_ABI/
+fi
+if [ $BUILD_FFTE_CUDA == 1 ]; then
+ln -s ${FFTE_OUT}/$APP_ABI/lib/libffte_cuda.a libs/$APP_ABI/
+fi
+
+popd
+exit 0
