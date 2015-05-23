@@ -304,7 +304,21 @@ case $APP_ABI in
   *) echo $0: Unknown target; exit
 esac
 
+ret=$?
+echo "ret=$ret"
+if [ "$ret" != '0' ]; then
+echo "$0 cmake error!!!!"
+exit -1
+fi
+
 make -j${CORE_COUNT}
+
+ret=$?
+echo "ret=$ret"
+if [ "$ret" != '0' ]; then
+echo "$0 make error!!!!"
+exit -1
+fi
 
 popd
 pushd ${FFTE_OUT}

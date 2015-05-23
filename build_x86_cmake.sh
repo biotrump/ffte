@@ -16,13 +16,8 @@ CYGWIN*)
 	exit -1
 esac
 
-#There are more make.inc.x in INSTALL
-if [ -f make.inc.example ]; then
-cp -f make.inc.example make.inc
-fi
-
 if [ ! -d build_x86 ]; then
-mkdir build_x86
+mkdir -p build_x86
 else
 rm -rf build_x86/*
 fi
